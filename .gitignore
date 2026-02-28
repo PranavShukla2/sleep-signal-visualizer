@@ -1,0 +1,24 @@
+# Ignore raw and processed data
+Data/
+Dataset/
+Visualizations/
+
+# Ignore Python virtual environment
+venv/
+env/
+
+# Ignore Mac system files
+.DS_Store
+**/.DS_Store
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore saved model weights
+*.pth
+*.h5
+*.ptx
+
+# Ignore reports and generated documents
+*.pdf
