@@ -50,4 +50,4 @@ python scripts/train_model.py -dataset "Dataset/breathing_dataset.pkl"
 Results Overview
 The baseline 1D CNN achieved an overall accuracy of 91.37%. However, looking closely at the confusion matrix reveals a severe class imbalance favoring normal breathing windows (creating an "Accuracy Paradox").
 
-For a much deeper dive into the methodology, the class imbalance issue, and the results, please check out report.pdf
+For a much deeper dive into the methodology, the class imbalance issue, and the results, please check out report.pdf.
