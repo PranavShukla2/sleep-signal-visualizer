@@ -207,13 +207,13 @@ def create_visualization(participant_dir):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", required=True)
+    parser.add_argument("-name", required=True)
     args = parser.parse_args()
 
-    if not os.path.exists(args.dir):
+    if not os.path.exists(args.name):
         return
 
-    create_visualization(args.dir)
+    create_visualization(args.name)
 
 if __name__ == "__main__":
     main()
