@@ -21,12 +21,12 @@ def load_signal(file_path, col_name):
     )
 
     df["timestamp"] = df["timestamp"].astype(str).str.replace(",", ".")
-    
     df["timestamp"] = pd.to_datetime(
         df["timestamp"], 
         format="%d.%m.%Y %H:%M:%S.%f", 
         errors="coerce"
     )
+    
     if df[col_name].dtype == object:
         df[col_name] = df[col_name].str.replace(",", ".")
     df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
@@ -50,7 +50,6 @@ def load_events(file_path):
         header=None
     )
     
-    
     events = events.dropna(subset=["time_range"])
       
     time_split = events["time_range"].str.split("-", expand=True)
@@ -68,9 +67,9 @@ def load_events(file_path):
     events["event_type"] = events["event_type"].astype(str).str.strip()
         
     return events
+
 def create_visualization(participant_dir):
     participant_name = os.path.basename(os.path.normpath(participant_dir))
-    
     
     nasal_path = thoracic_path = spo2_path = events_path = ""
     
@@ -92,61 +91,90 @@ def create_visualization(participant_dir):
     events_df = load_events(events_path)
 
     os.makedirs("Visualizations", exist_ok=True)
-    output_path = os.path.join(
-        "Visualizations", f"{participant_name}_visualization.pdf"
-    )
+    output_path = os.path.join("Visualizations", f"{participant_name}_visualization.pdf")
 
+    all_times = []
+    for df in [nasal_df, thoracic_df, spo2_df]:
+        if not df.empty:
+            all_times.append(df.index.min())
+            all_times.append(df.index.max())
+            
+    if not all_times:
+        print("Error: No valid data found to plot.")
+        return
+
+    recording_start = min(all_times)
+    recording_end = max(all_times)
+    
+    window_duration = pd.Timedelta(minutes=30)
+    current_time = recording_start
+
+    print(f"Generating paginated PDF for {participant_name}...")
+    
     with PdfPages(output_path) as pdf:
-        fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
-       
-        if not nasal_df.empty:
-            axes[0].plot(nasal_df.index, nasal_df["Nasal Airflow"], rasterized=True)
-        axes[0].set_title("Nasal Airflow (32 Hz)")
-        axes[0].set_ylabel("Amplitude")
+        while current_time < recording_end:
+            window_end = current_time + window_duration
+            
+            fig, axes = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
+            
+            n_chunk = nasal_df.loc[current_time:window_end] if not nasal_df.empty else pd.DataFrame()
+            t_chunk = thoracic_df.loc[current_time:window_end] if not thoracic_df.empty else pd.DataFrame()
+            s_chunk = spo2_df.loc[current_time:window_end] if not spo2_df.empty else pd.DataFrame()
 
-        if not thoracic_df.empty:
-            axes[1].plot(thoracic_df.index, thoracic_df["Thoracic Movement"], rasterized=True)
-        axes[1].set_title("Thoracic Movement (32 Hz)")
-        axes[1].set_ylabel("Amplitude")
+            if not n_chunk.empty:
+                axes[0].plot(n_chunk.index, n_chunk["Nasal Airflow"], color="#1f77b4", linewidth=0.8, rasterized=True)
+            axes[0].set_title("Nasal Airflow")
+            axes[0].set_ylabel("Amplitude")
 
-        if not spo2_df.empty:
-            axes[2].plot(spo2_df.index, spo2_df["SpO2"], rasterized=True)
-        axes[2].set_title("SpO₂ (4 Hz)")
-        axes[2].set_ylabel("SpO₂ (%)")
-        axes[2].set_xlabel("Clock Time")
+            if not t_chunk.empty:
+                axes[1].plot(t_chunk.index, t_chunk["Thoracic Movement"], color="#ff7f0e", linewidth=0.8, rasterized=True)
+            axes[1].set_title("Thoracic Movement")
+            axes[1].set_ylabel("Amplitude")
 
-        axes[2].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        plt.setp(axes[2].xaxis.get_majorticklabels(), rotation=45, ha='right')
-        
-        event_colors = {"apnea": "red", "hypopnea": "orange", "arousal": "purple"}
-        legend_patches = {}
+            if not s_chunk.empty:
+                axes[2].plot(s_chunk.index, s_chunk["SpO2"], color="#2ca02c", linewidth=1.5, rasterized=True)
+                axes[2].set_ylim(75, 100) 
+            axes[2].set_title("SpO₂ (%)")
+            axes[2].set_ylabel("SpO₂")
+            axes[2].set_xlabel("Clock Time")
 
-        if not events_df.empty and "start_time" in events_df.columns:
-            for _, event in events_df.iterrows():
-                start = event["start_time"]
-                end = event["end_time"]
-                
-                e_type = str(event.get("event_type", "unknown")).lower()
-                color = event_colors.get(e_type, "blue")
+            axes[2].set_xlim(current_time, window_end)
+            axes[2].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            plt.setp(axes[2].xaxis.get_majorticklabels(), rotation=45, ha='right')
+            
+            event_colors = {"apnea": "red", "hypopnea": "orange", "arousal": "purple", "desaturation": "brown"}
+            legend_patches = {}
 
-                for ax in axes:
-                    ax.axvspan(start, end, color=color, alpha=0.3)
-                
-                if e_type not in legend_patches:
-                    legend_patches[e_type] = mpatches.Patch(color=color, alpha=0.3, label=e_type.capitalize())
+            if not events_df.empty and "start_time" in events_df.columns:
+                for _, event in events_df.iterrows():
+                    start = event["start_time"]
+                    end = event["end_time"]
+                    
+                    if start < window_end and end > current_time:
+                        e_type = str(event.get("event_type", "unknown")).lower()
+                        base_type = "apnea" if "apnea" in e_type else ("hypopnea" if "hypopnea" in e_type else e_type)
+                        color = event_colors.get(base_type, "blue")
 
-        if legend_patches:
-            axes[0].legend(handles=list(legend_patches.values()), loc="upper right")
+                        for ax in axes:
+                            ax.axvspan(start, end, color=color, alpha=0.3)
+                        
+                        if base_type not in legend_patches:
+                            legend_patches[base_type] = mpatches.Patch(color=color, alpha=0.3, label=base_type.capitalize())
 
-        plt.tight_layout()
-        pdf.savefig(fig, dpi=300) 
-        plt.close(fig)
+            if legend_patches:
+                axes[0].legend(handles=list(legend_patches.values()), loc="upper right")
+
+            plt.tight_layout()
+            pdf.savefig(fig, dpi=150)
+            plt.close(fig)
+            
+            current_time = window_end
 
     print(f"Visualization saved at: {output_path}")
+
 def main():
     parser = argparse.ArgumentParser(description="Generate sleep signal visualization PDF")
-   
-    parser.add_argument("--dir", required=True, help="Path to participant folder (e.g., Data/AP20)")
+    parser.add_argument("--dir", required=True, help="Path to participant folder (e.g., Data/AP02)")
     args = parser.parse_args()
 
     if not os.path.exists(args.dir):
