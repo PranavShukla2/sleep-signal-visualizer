@@ -1,14 +1,15 @@
-import matplotlib.dates as mdates
 import os
 import argparse
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
+from matplotlib.backends.backend_pdf import PdfPages
+from scipy.signal import butter, filtfilt, medfilt
 
 def load_signal(file_path, col_name): 
     if not os.path.exists(file_path):
-        print(f"Warning: Signal file not found: {file_path}")
         return pd.DataFrame()
 
     df = pd.read_csv(
@@ -38,7 +39,6 @@ def load_signal(file_path, col_name):
 
 def load_events(file_path):
     if not os.path.exists(file_path):
-        print(f"Warning: Events file not found: {file_path}")
         return pd.DataFrame()
     
     events = pd.read_csv(
@@ -68,6 +68,40 @@ def load_events(file_path):
         
     return events
 
+def preprocess_respiratory(df, col_name, fs=32):
+    if df.empty:
+        return df
+    nyq = 0.5 * fs
+    low = 0.1 / nyq
+    high = 3.0 / nyq
+    b, a = butter(4, [low, high], btype='band')
+    
+    signal = df[col_name].fillna(0).values
+    filtered_signal = filtfilt(b, a, signal)
+    
+    mean_val = np.mean(filtered_signal)
+    std_val = np.std(filtered_signal)
+    
+    if std_val != 0:
+        df[col_name] = (filtered_signal - mean_val) / std_val
+    else:
+        df[col_name] = filtered_signal - mean_val
+        
+    return df
+
+def preprocess_spo2(df, col_name, fs=4):
+    if df.empty:
+        return df
+    df.loc[(df[col_name] < 50) | (df[col_name] > 100), col_name] = np.nan
+    df[col_name] = df[col_name].interpolate(method='linear').bfill().ffill()
+    
+    window_size = int(5 * fs)
+    if window_size % 2 == 0:
+        window_size += 1
+        
+    df[col_name] = medfilt(df[col_name].values, kernel_size=window_size)
+    return df
+
 def create_visualization(participant_dir):
     participant_name = os.path.basename(os.path.normpath(participant_dir))
     
@@ -90,6 +124,10 @@ def create_visualization(participant_dir):
     spo2_df = load_signal(spo2_path, "SpO2")
     events_df = load_events(events_path)
 
+    nasal_df = preprocess_respiratory(nasal_df, "Nasal Airflow", fs=32)
+    thoracic_df = preprocess_respiratory(thoracic_df, "Thoracic Movement", fs=32)
+    spo2_df = preprocess_spo2(spo2_df, "SpO2", fs=4)
+
     os.makedirs("Visualizations", exist_ok=True)
     output_path = os.path.join("Visualizations", f"{participant_name}_visualization.pdf")
 
@@ -100,7 +138,6 @@ def create_visualization(participant_dir):
             all_times.append(df.index.max())
             
     if not all_times:
-        print("Error: No valid data found to plot.")
         return
 
     recording_start = min(all_times)
@@ -109,8 +146,6 @@ def create_visualization(participant_dir):
     window_duration = pd.Timedelta(minutes=30)
     current_time = recording_start
 
-    print(f"Generating paginated PDF for {participant_name}...")
-    
     with PdfPages(output_path) as pdf:
         while current_time < recording_end:
             window_end = current_time + window_duration
@@ -123,18 +158,18 @@ def create_visualization(participant_dir):
 
             if not n_chunk.empty:
                 axes[0].plot(n_chunk.index, n_chunk["Nasal Airflow"], color="#1f77b4", linewidth=0.8, rasterized=True)
-            axes[0].set_title("Nasal Airflow")
-            axes[0].set_ylabel("Amplitude")
+            axes[0].set_title("Nasal Airflow (Filtered & Normalized)")
+            axes[0].set_ylabel("Z-Score")
 
             if not t_chunk.empty:
                 axes[1].plot(t_chunk.index, t_chunk["Thoracic Movement"], color="#ff7f0e", linewidth=0.8, rasterized=True)
-            axes[1].set_title("Thoracic Movement")
-            axes[1].set_ylabel("Amplitude")
+            axes[1].set_title("Thoracic Movement (Filtered & Normalized)")
+            axes[1].set_ylabel("Z-Score")
 
             if not s_chunk.empty:
                 axes[2].plot(s_chunk.index, s_chunk["SpO2"], color="#2ca02c", linewidth=1.5, rasterized=True)
                 axes[2].set_ylim(75, 100) 
-            axes[2].set_title("SpO₂ (%)")
+            axes[2].set_title("SpO₂ (%) (Cleaned)")
             axes[2].set_ylabel("SpO₂")
             axes[2].set_xlabel("Clock Time")
 
@@ -170,15 +205,12 @@ def create_visualization(participant_dir):
             
             current_time = window_end
 
-    print(f"Visualization saved at: {output_path}")
-
 def main():
-    parser = argparse.ArgumentParser(description="Generate sleep signal visualization PDF")
-    parser.add_argument("--dir", required=True, help="Path to participant folder (e.g., Data/AP02)")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dir", required=True)
     args = parser.parse_args()
 
     if not os.path.exists(args.dir):
-        print(f"Error: Provided participant folder '{args.dir}' does not exist.")
         return
 
     create_visualization(args.dir)
