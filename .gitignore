@@ -1,24 +1,15 @@
-# Ignore raw and processed data
+# Ignore raw clinical data
 Data/
-Dataset/
-Visualizations/
 
-# Ignore Python virtual environment
+# Ignore generated datasets (too large for GitHub)
+Dataset/*.pkl
+
+# Ignore Python virtual environment and cache
 venv/
 env/
+__pycache__/
+*.pyc
 
 # Ignore Mac system files
 .DS_Store
 **/.DS_Store
-
-# Ignore Python cache
-__pycache__/
-*.pyc
-
-# Ignore saved model weights
-*.pth
-*.h5
-*.ptx
-
-# Ignore reports and generated documents
-*.pdf
