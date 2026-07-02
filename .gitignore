@@ -1,8 +1,12 @@
 # Ignore raw clinical data
 Data/
 
-# Ignore generated datasets (too large for GitHub)
-Dataset/*.pkl
+# Ignore generated datasets (too large for GitHub / privacy)
+Dataset/
+*.pkl
+
+# Ignore generated model-output arrays
+outputs/*.npz
 
 # Ignore Python virtual environment and cache
 venv/
